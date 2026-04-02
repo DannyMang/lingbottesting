@@ -1,5 +1,5 @@
 #!/bin/bash
-set -euo pipefail
+set -eo pipefail
 
 echo "=== LingBot-World-Fast Setup ==="
 
@@ -8,16 +8,22 @@ sudo apt-get update && sudo apt-get install -y ffmpeg libgl1 git
 
 # --- Find CUDA home ---
 if [ -z "${CUDA_HOME:-}" ]; then
-  # Common locations on cloud GPU instances
-  for p in /usr/local/cuda /usr/local/cuda-12.4 /usr/local/cuda-12 /usr; do
+  for p in /usr/local/cuda /usr/local/cuda-12.4 /usr/local/cuda-12.2 /usr/local/cuda-12 /usr/lib/cuda /usr; do
     if [ -f "$p/bin/nvcc" ]; then
       export CUDA_HOME="$p"
       break
     fi
   done
+  # Last resort: find nvcc anywhere
+  if [ -z "${CUDA_HOME:-}" ]; then
+    NVCC_PATH=$(find / -name nvcc -type f 2>/dev/null | head -1)
+    if [ -n "$NVCC_PATH" ]; then
+      export CUDA_HOME=$(dirname $(dirname "$NVCC_PATH"))
+    fi
+  fi
 fi
-echo "CUDA_HOME=$CUDA_HOME"
-echo "nvcc: $(which nvcc 2>/dev/null || $CUDA_HOME/bin/nvcc --version 2>/dev/null | tail -1 || echo 'not found')"
+echo "CUDA_HOME=${CUDA_HOME:-NOT FOUND}"
+echo "nvcc: $(which nvcc 2>/dev/null || echo 'not in PATH')"
 
 # --- Check torch + CUDA version ---
 TORCH_CUDA=$(python3 -c "import torch; print(torch.version.cuda)" 2>/dev/null || echo "unknown")
@@ -60,6 +66,12 @@ if pip install "$WHEEL_URL" 2>/dev/null; then
   echo "Installed flash-attn from prebuilt wheel."
 else
   echo "Prebuilt wheel not found, building from source..."
+  if [ -z "${CUDA_HOME:-}" ]; then
+    echo "ERROR: CUDA_HOME not found. Install cuda-toolkit or set CUDA_HOME manually."
+    echo "  Try: sudo apt install nvidia-cuda-toolkit"
+    echo "  Or:  export CUDA_HOME=/path/to/cuda && pip install flash-attn --no-build-isolation"
+    exit 1
+  fi
   CUDA_HOME="$CUDA_HOME" pip install flash-attn --no-build-isolation
 fi
 
